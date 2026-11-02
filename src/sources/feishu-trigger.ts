@@ -9,7 +9,8 @@ export const feishuChannel = (chatId: string, messageId: string, direct = false)
   ({ source: SOURCE, thread: `feishu:${chatId}`, address: { chatId, messageId, ...direct ? { direct: 'true' } : {} } })
 /** A message as the live event consumer prints it; the history and topic-page paths normalize what they read into this shape. */
 const EventSchema = z.object({ message_id: z.string(), chat_id: z.string(), chat_type: z.enum(['p2p', 'group']),
-  sender_id: z.string(), sender_type: z.string(), content: z.string(), create_time: z.string(),
+  sender_id: z.string(), sender_type: z.string().optional(), content: z.string(), create_time: z.string(),
+  message_type: z.string().optional(),
   mentions: z.array(z.object({ id: z.string(), key: z.string().optional(), name: z.string().optional() })).default([]),
   root_id: z.string().optional(), parent_id: z.string().optional(), thread_id: z.string().optional(), message_app_link: z.url().optional() })
 export type FeishuEvent = z.infer<typeof EventSchema>
@@ -31,11 +32,15 @@ export function feishuTime(value: string): string {
 export function feishuTrigger(input: unknown, botId: string, botAppId: string): Trigger | undefined {
   const event = EventSchema.parse(input)
   if (event.sender_id === botId || event.sender_id === botAppId) return
+  // Feishu system notices (joins, recalls, …) carry no sender_type and no author: drop them.
+  if (event.message_type === 'system') return
+  // lark-cli omits sender_type on some deliveries; Feishu prefixes user ids with ou_ and app ids with cli_.
+  const human = event.sender_type === undefined ? event.sender_id.startsWith('ou_') : event.sender_type === 'user'
   const direct = event.chat_type === 'p2p'
   const mentioned = event.mentions.some(mention => mention.id === botId || mention.id === botAppId)
   const thread = feishuThreadId(event.chat_id, event.root_id, event.message_id)
   return { id: feishuTriggerId(event.message_id), source: SOURCE, threads: [{ source: SOURCE, id: thread }],
-    actor: { source: SOURCE, id: event.sender_id }, human: event.sender_type === 'user',
+    actor: { source: SOURCE, id: event.sender_id }, human,
     ...(direct ? { addressed: 'direct' as const } : mentioned ? { addressed: 'mention' as const } : {}),
     at: feishuTime(event.create_time), text: withMentionNames(event.content, event.mentions),
     channel: feishuChannel(event.chat_id, event.message_id, direct), ...(event.message_app_link ? { url: event.message_app_link } : {}),
@@ -55,7 +60,7 @@ export const HistoricalMessageSchema = z.looseObject({
   message_id: z.string(), chat_id: z.string(), create_time: z.string(),
   root_id: z.string().optional(), parent_id: z.string().optional(), thread_id: z.string().optional(),
   deleted: z.boolean().optional(), message_app_link: z.string().optional(),
-  sender: z.looseObject({ id: z.string().default(''), sender_type: z.string() }),
+  sender: z.looseObject({ id: z.string().default(''), sender_type: z.string().optional() }),
   body: z.looseObject({ content: z.string() }).optional(),
   mentions: z.array(z.looseObject({ id: z.string(), key: z.string().optional(), name: z.string().optional() })).optional(),
 })

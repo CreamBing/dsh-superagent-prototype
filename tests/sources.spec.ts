@@ -122,6 +122,16 @@ describe('feishu source', () => {
     expect(feishuTrigger({ message_id: 'om_3', chat_id: 'oc_1', chat_type: 'p2p', sender_id: 'ou_bot', sender_type: 'bot', content: 'me', create_time: '1' }, 'ou_bot', 'cli_bot')).toBeUndefined()
     expect(feishuTrigger(historyEvent({ message_id: 'om_4', chat_id: 'oc_1', create_time: '2', sender: { id: 'ou_x', sender_type: 'app' }, body: { content: '{"text":"from app"}' } }, 'oc_1', false), 'ou_bot', 'cli_bot')).toMatchObject({ human: false, text: 'from app', threads: [{ id: 'oc_1:om_4' }] })
   })
+  it('accepts live events that omit sender_type and drops system notices', () => {
+    // lark-cli omits sender_type on some deliveries; Feishu prefixes user ids with ou_.
+    const inferred = feishuTrigger({ message_id: 'om_7', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, content: '@bot hi', create_time: '1', mentions: [{ id: 'cli_bot' }] }, 'ou_bot', 'cli_bot')!
+    expect(inferred.human).toBe(true)
+    expect(inferred.addressed).toBe('mention')
+    // A message whose sender_id is the bot's app id is still dropped.
+    expect(feishuTrigger({ message_id: 'om_8', chat_id: 'oc_1', chat_type: 'group', sender_id: 'cli_bot', content: 'x', create_time: '1' }, 'ou_bot', 'cli_bot')).toBeUndefined()
+    // System notices (a person joined, a message was recalled) have no author and must not become work.
+    expect(feishuTrigger({ message_id: 'om_9', chat_id: 'oc_1', chat_type: 'group', sender_id: '', content: '', create_time: '1', message_type: 'system' }, 'ou_bot', 'cli_bot')).toBeUndefined()
+  })
   it('polls subscribed threads and stores unseen replies as triggers on that thread', async () => {
     const h = host()
     const source = feishuTrigger({ message_id: 'om_root', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: '@bot fix', create_time: '1', mentions: [{ id: 'ou_bot' }] }, 'ou_bot', 'cli_bot')!
